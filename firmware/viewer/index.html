@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Radar-Tracker CYD (Web Serial)</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#000;color:#ddd;font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-text-size-adjust:100%}
+.wrap{max-width:640px;margin:0 auto;padding:8px}
+h1{font-size:17px;margin:2px 0 6px;display:flex;justify-content:space-between;align-items:center}
+h1 small{font-weight:400;color:#8a8;font-size:12px}
+.chips{display:flex;gap:6px;margin-bottom:8px}
+.conn{display:flex;gap:6px;align-items:center;margin-bottom:8px;color:#aaa;font-size:13px}
+.conn select{background:#111;color:#fff;border:1px solid #555;border-radius:8px;padding:6px;font-size:14px}
+.front{background:#0a2a14;border:1px solid #165;border-radius:8px;padding:4px 8px;margin:4px 0 6px;color:#8fc;font-size:13px}
+.chip{flex:1;border:1px solid #333;border-radius:8px;padding:6px 4px;text-align:center;font-size:13px;background:#111}
+.chip i{display:inline-block;width:10px;height:10px;border-radius:50%;background:#f00;margin-right:5px;vertical-align:-1px}
+.chip.ok i{background:#0f0}.chip.idle i{background:#fe0}
+canvas{width:100%;display:block;background:#000;border:1px solid #243;border-radius:8px}
+.btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:6px;margin:8px 0}
+button{min-height:52px;border:1px solid #fff;border-radius:10px;background:#001080;color:#fff;font-size:15px;font-weight:600;padding:4px}
+button.on{background:#046a04}
+.sum{display:flex;justify-content:space-between;color:#aaa;margin:4px 2px}
+.leg{display:flex;flex-wrap:wrap;gap:4px 12px;color:#9a9;font-size:12px;margin:4px 2px 8px}
+.leg span:before{content:"";display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:4px;vertical-align:-1px;border:2px solid #f90}
+.leg .f:before{background:#f90}.leg .r:before{background:none}.leg .h:before{background:radial-gradient(#f90 30%,transparent 35%)}
+.leg .g:before{background:#0f0;border-color:#0f0}
+h2{font-size:14px;margin:12px 0 4px;color:#7ff}
+table{width:100%;table-layout:auto;border-collapse:collapse;font-size:12.5px}
+th,td{padding:3px 4px;text-align:right;border-bottom:1px solid #222;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:#889;font-weight:500}
+th,td{padding:3px 3px}.cnt{color:#778;font-size:12px;margin:3px 2px}
+#bar{display:flex;gap:6px;margin-bottom:8px}
+#bc{flex:1;min-height:48px;background:#0a5;border-color:#fff}
+#bc.off{background:#a30}
+#st{flex:2;display:flex;align-items:center;color:#aaa;font-size:13px;padding:0 6px;border:1px solid #333;border-radius:10px;background:#111}
+#err{display:none;background:#a00;color:#fff;padding:6px 8px;border-radius:8px;margin-bottom:8px;text-align:center}
+.foot{color:#667;font-size:11px;margin:12px 0 20px}
+</style></head><body><div class="wrap">
+<h1>Radar-Tracker <small id="meta">&nbsp;</small></h1>
+<div id="err"></div>
+<div id="bar"><button id="bc">Verbinden</button><div id="st">Nicht verbunden</div></div>
+<div class="conn"><label for="baud">Baudrate</label><select id="baud"><option>115200</option><option>230400</option><option selected>460800</option><option>921600</option></select><span id="bh">(Firmware: 460800)</span></div>
+<div class="chips"><div class="chip" id="c0"><i></i>LD2450</div><div class="chip" id="c1"><i></i>LD2410C</div><div class="chip" id="c2" style="display:none"><i></i>LD2420</div></div>
+<canvas id="cv"></canvas>
+<div class="front" id="fr">Nur Gegner vor dem Ger&auml;t &ndash; nichts hinter dem Ger&auml;t.</div>
+<div class="sum"><span id="sum">Gegner vor dem Ger&auml;t: 0 &middot; best&auml;tigt 0</span><span id="zl">6 m</span></div>
+<div class="btns"><button id="bz">Zoom<br><small id="bzs">6 m</small></button><button id="bm">X spiegeln<br><small id="bms">aus</small></button><button id="bs">Simulation<br><small id="bss">aus</small></button><button id="br">Reset<br><small>Ziele</small></button><button id="bt">Spur<br><small id="bts">aus</small></button></div>
+<div class="cnt" id="pf">Messpunkte: jede Zeile wird sofort als eigener Punkt gezeichnet (keine Glättung, keine Interpolation).</div>
+<div class="leg"><span class="f">bewegt</span><span class="r">ruhend (LD2450 sieht)</span><span class="h">gehalten (nur LD2410C)</span><span class="g">gr&uuml;n = best&auml;tigt (LD2450 + LD2410C)</span></div>
+<h2>Gegner vor dem Ger&auml;t (Fusion)</h2><table id="tt"></table>
+<h2>LD2450 (Rohwerte)</h2><table id="t0"></table><div class="cnt" id="k0"></div>
+<h2>LD2410C (Rohwerte)</h2><table id="t1"></table><div class="cnt" id="k1"></div>
+<div id="s420" style="display:none"><h2>LD2420 (Rohwerte)</h2><table id="t2"></table><div class="cnt" id="k2"></div></div>
+<div class="foot">Wei&szlig;e Kreuze = LD2450-Rohpositionen vor dem Ger&auml;t. Ziele hinter dem Ger&auml;t oder au&szlig;erhalb &plusmn;60&deg; werden von der Firmware verworfen und nie gezeichnet. Der LD2410C erzeugt nie allein ein Ziel, er best&auml;tigt nur. Gestrichelter Bogen nur, wenn die Firmware mit SHOW_RANGE_ONLY_RINGS=1 gebaut wurde. Ungetestet an echter Hardware. Daten kommen per USB-Seriell (Web Serial); Zoom/Spiegeln werden im Browser gespeichert.</div>
+</div>
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)};
+var zoom=+(localStorage.getItem('zoom')||6), mirror=localStorage.getItem('mirror')==='1', last=null, simOn=false;
+var cv=$('cv'), ctx=cv.getContext('2d');
+// Spur (Standard AUS): letzte ~1 s echte LD2450-Messpunkte als einzelne Punkte (keine Linien, keine Glaettung)
+var trailOn=localStorage.getItem('trail')==='1', TRAIL_MS=1000, trail=[], lastFr=-1;
+// Messwerte des Viewers (auch fuer Tests): Zeilen/s, Zeichnungen/s, Latenz Zeile -> Zeichnung
+var stats={timerDraws:0,trail:0,firstT:0,lastT:0,lines:0,draws:0,lps:0,fps:0,latAvg:0,latMax:0}, lineT=[], drawT=[], latSum=0, latN=0, latMax=0, raf=0, tRecv=0;
+window.__stats=stats;
+var NAMES=['LD2450','LD2410C','LD2420'], NS=2, baud=+(localStorage.getItem('baud')||460800);
+$('baud').value=String(baud); $('baud').onchange=function(){baud=+$('baud').value;try{localStorage.setItem('baud',baud)}catch(e){} if(reader)msg('Baudrate geändert: bitte Trennen und neu Verbinden.')};
+function save(){try{localStorage.setItem('zoom',zoom);localStorage.setItem('mirror',mirror?'1':'0');localStorage.setItem('trail',trailOn?'1':'0')}catch(e){}}
+function ui(){ $('zl').textContent=zoom+' m'; $('bzs').textContent=zoom+' m'; $('bms').textContent=mirror?'an':'aus';
+  $('bm').className=mirror?'on':''; $('bts').textContent=trailOn?'an':'aus'; $('bt').className=trailOn?'on':''; $('bss').textContent=simOn?'AN':'aus'; $('bs').className=simOn?'on':''; }
+function send(t){ if(!writer)return false; writer.write(new TextEncoder().encode(t+'\n')).catch(function(){}); return true }
+$('bz').onclick=function(){zoom=zoom===6?3:6;save();ui();draw()};
+$('bm').onclick=function(){mirror=!mirror;save();ui();draw()};
+$('bt').onclick=function(){trailOn=!trailOn; if(!trailOn)trail=[]; save();ui();draw()};
+$('bs').onclick=function(){ if(!send('sim '+(simOn?0:1))) msg('Erst verbinden, dann Simulation umschalten.'); };
+$('br').onclick=function(){ if(!send('reset')) msg('Erst verbinden.'); else trail=[]; };
+function size(){var dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=Math.round(w*0.62);
+  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);cv.style.height=h+'px'}
+  return {w:w,h:h,dpr:dpr}}
+function pol(s,xmm,ymm,R,ox,oy){var m=zoom*1000,xx=mirror?-xmm:xmm,
+  px=ox+xx/m*R, py=oy-ymm/m*R, d=Math.sqrt(xx*xx+ymm*ymm); if(d>m){px=ox+xx/d*m/m*R;py=oy-ymm/d*R}
+  return [px,py,d>m]}
+function draw(){
+  var s=size(); ctx.setTransform(s.dpr,0,0,s.dpr,0,0); ctx.clearRect(0,0,s.w,s.h); ctx.fillStyle='#000'; ctx.fillRect(0,0,s.w,s.h);
+  var S=Math.sin(Math.PI/3), R=Math.min(s.h-16,(s.w/2-8)/S), ox=s.w/2, oy=s.h-6;
+  ctx.lineWidth=1; ctx.font='11px system-ui,sans-serif';
+  for(var m=1;m<=zoom;m++){ if(zoom===6&&m%2)continue; var r=R*m/zoom; ctx.strokeStyle='#064'; ctx.beginPath(); ctx.arc(ox,oy,r,-Math.PI/2-Math.PI/3,-Math.PI/2+Math.PI/3); ctx.stroke();
+    ctx.fillStyle='#777'; ctx.fillText(m+' m',ox+3,oy-r+11)}
+  ctx.strokeStyle='#064'; for(var a=-60;a<=60;a+=30){var t=(a-90)*Math.PI/180; ctx.beginPath(); ctx.moveTo(ox,oy); ctx.lineTo(ox+R*Math.cos(t),oy+R*Math.sin(t)); ctx.stroke()}
+  ctx.strokeStyle='#0f0'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(ox,oy); ctx.arc(ox,oy,R,-Math.PI/2-Math.PI/3,-Math.PI/2+Math.PI/3); ctx.closePath(); ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(ox,oy,3,0,7); ctx.fill();
+  if(!last)return;
+  // Praesenz ohne Spur: gestrichelter Bogen
+  ctx.setLineDash([5,4]); ctx.lineWidth=2; (last.or||[]).forEach(function(o){ctx.strokeStyle=o.s===1?'#0ff':'#f0f';
+    var r=o.d/(zoom*1000)*R; if(r>R)return; ctx.beginPath(); ctx.arc(ox,oy,r,-Math.PI/2-Math.PI/3,-Math.PI/2+Math.PI/3); ctx.stroke()}); ctx.setLineDash([]);
+  // Rohpositionen LD2450
+  ctx.strokeStyle='#fff'; ctx.lineWidth=1; if(last.s[0].st===1) last.r450.forEach(function(t){ if(!t.v||t.f===0||t.y<=0)return; var p=pol(s,t.x,t.y,R,ox,oy);
+    ctx.beginPath(); ctx.moveTo(p[0]-4,p[1]); ctx.lineTo(p[0]+4,p[1]); ctx.moveTo(p[0],p[1]-4); ctx.lineTo(p[0],p[1]+4); ctx.stroke()});
+  if(trailOn){ var now=performance.now(); ctx.fillStyle='#fff';
+    trail.forEach(function(e){ var a=1-(now-e.t)/TRAIL_MS; if(a<=0)return; ctx.globalAlpha=0.15+0.6*a;
+      e.p.forEach(function(q){ var p=pol(s,q.x,q.y,R,ox,oy); ctx.beginPath(); ctx.arc(p[0],p[1],2.5,0,7); ctx.fill() }) }); ctx.globalAlpha=1 }
+  last.tr.forEach(function(t){ if(t.y<=0)return; var p=pol(s,t.x,t.y,R,ox,oy), col=t.c?'#0f0':'#ffa000', rr=8;
+    ctx.globalAlpha=p[2]?0.5:1; ctx.strokeStyle=col; ctx.fillStyle=col; ctx.lineWidth=3;
+    if(t.s===0){ctx.beginPath();ctx.arc(p[0],p[1],rr,0,7);ctx.fill()}
+    else{ctx.beginPath();ctx.arc(p[0],p[1],rr,0,7);ctx.stroke(); if(t.s===2){ctx.beginPath();ctx.arc(p[0],p[1],2.5,0,7);ctx.fill()}}
+    ctx.globalAlpha=1; ctx.fillStyle='#fff'; ctx.font='bold 12px system-ui,sans-serif'; ctx.fillText(t.id,p[0]+rr+3,p[1]+4); ctx.font='10px system-ui,sans-serif'; ctx.fillStyle='#9cf'; ctx.fillText(cm(t.x)+', '+cm(t.y)+' cm',p[0]+rr+3,p[1]+16)});
+}
+function esc(v){return v}
+function cm(v){return (Math.round(v/10)||0)}   // ganze cm
+function tbl(el,head,rows){var h='<tr>'+head.map(function(x,i){return '<th>'+x+'</th>'}).join('')+'</tr>';
+  el.innerHTML=h+rows.map(function(r){return '<tr>'+r.map(function(x){return '<td>'+x+'</td>'}).join('')+'</tr>'}).join('')}
+var STN=['bewegt','ruhend','gehalten'];
+function renderDom(d){
+  simOn=!!d.sim; ui(); NS=d.ns||d.s.length;
+  for(var i=0;i<3;i++){var c=$('c'+i); if(i>=NS){c.style.display='none';continue} c.style.display=''; c.className='chip'+(d.s[i].st===1?' ok':d.s[i].st===2?' idle':'')}
+  var fr=d.tr.filter(function(t){return t.y>0});
+  $('sum').innerHTML='Gegner vor dem Ger&auml;t: '+fr.length+' &middot; best&auml;tigt '+fr.filter(function(t){return t.c}).length;
+  $('fr').textContent='Nur vor dem Gerät (y > '+(d.fy!=null?d.fy:150)+' mm, ±'+(d.fa||60)+'°, ab '+(d.fm!=null?d.fm:300)+' mm) – hinter dem Gerät wird ausgefiltert. Verworfen: '+(d.fd||0)+' LD2450-Ziele.';
+  $('meta').textContent=(d.sim?'SIMULATION ':'')+Math.round(d.t/1000)+' s';
+  tbl($('tt'),['ID','X cm','Y cm','Dist cm','Zustand','best.','Sensoren'],fr.map(function(t){
+    return [t.id,cm(t.x),cm(t.y),cm(Math.sqrt(t.x*t.x+t.y*t.y)),STN[t.s],t.c?'ja':'nein',(t.by[0]?'2450 ':'')+(t.by[1]?'2410 ':'')+(t.by[2]&&NS>2?'2420':'')]}));
+  tbl($('t0'),['Ziel','X mm','Y mm','X cm','Y cm','Res mm','v cm/s'],d.r450.map(function(t,i){
+    if(!t.v) return ['T'+(i+1),'-','-','-','-','-','-'];
+    if(t.f===0) return ['T'+(i+1),t.x,t.y,'verworfen (nicht vor dem Gerät)','','',''];
+    return ['T'+(i+1),t.x,t.y,cm(t.x),cm(t.y),t.res,t.sp]})); $('k0').textContent='Frames '+d.s[0].fr+' · Resync '+d.s[0].rs+' · Bytes '+d.s[0].by;
+  var a=d.r410, st=['kein Ziel','bewegt','stehend','bewegt+stehend'][a.state&3];
+  tbl($('t1'),['Wert','Distanz cm','Energie'],[['Bewegt',a.md,a.me],['Stehend',a.sd,a.se],['Erkannt',a.dd,''],['Zustand',st,'']]); $('k1').textContent='Frames '+d.s[1].fr+' · Resync '+d.s[1].rs+' · Bytes '+d.s[1].by+' (nur Bestätigung, keine Richtung)';
+  var b=d.r420; $('s420').style.display=(b&&NS>2)?'':'none';
+  if(b&&NS>2){ tbl($('t2'),['Wert','Wert'],[['Pr&auml;senz',b.on?'ON':'OFF'],['Range cm',b.rv?b.rg:'-']]); $('k2').textContent='Zeilen '+d.s[2].fr+' · Resync '+d.s[2].rs+' · Bytes '+d.s[2].by }
+  var pf=d.pf||[0,0,0,0], cf=d.cf;
+  $('pf').textContent=(cf?'Firmware: Glättung α='+(cf[0]/100).toFixed(2)+(cf[0]>=100?' (aus: jede Messung exakt)':'')+' · Ziel weg nach '+cf[1]+' ms · Sprung > '+cf[2]+' mm erst nach '+cf[3]+' Frames · Sendetakt '+cf[4]+' ms':'Firmware: ältere Version (keine Konfiguration gemeldet)')
+    +(d.ol!=null?' · Ausreißer verworfen: '+d.ol:'')+(pf[0]?' · Anzeige am Gerät '+(pf[0]/10).toFixed(1)+' fps (Zeichnen '+pf[1]+' ms, LD2450 '+(pf[2]/10).toFixed(1)+'/s, Latenz '+pf[3]+' ms)':'');
+}
+// jede Zeile -> sofort beim naechsten Bildaufbau zeichnen (requestAnimationFrame, keine zusaetzliche Verzoegerung)
+var rafT=0;
+function markDirty(){ if(!raf){ tRecv=performance.now(); raf=requestAnimationFrame(function(){frame(0)}); rafT=setTimeout(function(){frame(1)},60) } }   // 60-ms-Sicherung: rAF steht in verdeckten Tabs still
+function frame(viaTimer){ if(!raf)return; cancelAnimationFrame(raf); clearTimeout(rafT); raf=0; if(viaTimer)stats.timerDraws++; var t=performance.now();
+  if(last){ renderDom(last); draw(); }
+  var l=t-tRecv; latSum+=l; latN++; if(l>latMax)latMax=l; stats.draws++; drawT.push(t); stats.trail=trail.length; stats.latAvg=latSum/latN; stats.latMax=latMax; }
+function onLine(d){
+  var t=performance.now(); last=d; stats.lines++; lineT.push(t); if(!stats.firstT)stats.firstT=t; stats.lastT=t;
+  if(d.s&&d.s[0]&&d.s[0].fr!==lastFr&&d.r450){ lastFr=d.s[0].fr;   // nur neue LD2450-Frames als Messpunkte (Zeilen dazwischen wiederholen sie)
+    var pts=d.r450.filter(function(q){return q.v&&q.f!==0&&q.y>0}); if(pts.length){ trail.push({t:t,p:pts}) } }
+  while(trail.length&&t-trail[0].t>TRAIL_MS) trail.shift();
+  markDirty();
+}
+function rates(){ var t=performance.now(); while(lineT.length&&t-lineT[0]>1000)lineT.shift(); while(drawT.length&&t-drawT[0]>1000)drawT.shift(); stats.lps=lineT.length; stats.fps=drawT.length; }
+
+// ---- Web Serial ----
+var port=null, reader=null, writer=null, wantOpen=false, buf='', lastLine=0, info='', okCount=0, badCount=0, retryT=null;
+function msg(t){ var e=$('err'); if(t){e.textContent=t;e.style.display='block'}else{e.style.display='none'} }
+function status(t){ $('st').textContent=t }
+function setConn(c){ $('bc').textContent=c?'Trennen':'Verbinden'; $('bc').className=c?'':'off'; if(!c){ for(var i=0;i<3;i++)$('c'+i).className='chip' } }
+function explain(e){
+  var n=e&&e.name, m=(e&&e.message)||String(e);
+  if(n==='NotFoundError') return 'Kein Port ausgewählt. Wähle im Fenster den CYD-Port („USB-SERIAL CH340“ bzw. COMx) und klicke „Verbinden“.';
+  if(n==='SecurityError') return 'Zugriff verweigert. Die Seite muss über http://localhost:8000 (start-viewer.bat) oder https geöffnet werden, nicht als Datei.';
+  if(n==='InvalidStateError') return 'Port ist schon geöffnet (anderes Tab oder Programm?). Andere Terminals schließen und neu verbinden.';
+  if(n==='NetworkError'||/Failed to open|access denied|busy/i.test(m)) return 'Port lässt sich nicht öffnen: wird von einem anderen Programm benutzt (Arduino-Monitor, PuTTY, anderes Browserfenster) oder fehlt der Treiber.';
+  return 'Fehler: '+m;
+}
+function handleLine(l){
+  l=l.replace(/\r$/,''); if(!l)return;
+  if(l.charAt(0)==='#'){ info=l.replace(/^#\s*/,''); return }
+  if(l.charAt(0)!=='{'){ badCount++; return }
+  try{ var d=JSON.parse(l); if(!d||!d.s||!d.r450)throw 0; onLine(d); okCount++; lastLine=Date.now(); msg('') }catch(e){ badCount++ }
+}
+async function readLoop(){
+  var dec=new TextDecoder();
+  try{
+    for(;;){
+      var r=await reader.read(); if(r.done)break;
+      buf+=dec.decode(r.value,{stream:true});
+      if(buf.length>20000)buf=buf.slice(-4000);
+      var p; while((p=buf.indexOf('\n'))>=0){ handleLine(buf.slice(0,p)); buf=buf.slice(p+1) }
+    }
+  }catch(e){ if(wantOpen) msg('Verbindung unterbrochen: '+explain(e)) }
+  await closePort(false);
+  if(wantOpen){ status('Getrennt – versuche erneut …'); scheduleRetry() }
+}
+async function closePort(user){
+  try{ if(reader){ try{await reader.cancel()}catch(e){} try{reader.releaseLock()}catch(e){} } }catch(e){}
+  try{ if(writer){ try{writer.releaseLock()}catch(e){} } }catch(e){}
+  reader=null; writer=null;
+  try{ if(port) await port.close() }catch(e){}
+  setConn(false); if(user){ status('Nicht verbunden') }
+}
+async function openPort(p){
+  try{
+    await p.open({baudRate:baud, bufferSize:8192});
+    try{ await p.setSignals({dataTerminalReady:false, requestToSend:false}) }catch(e){}   // CYD sendet immer; DTR/RTS aus, damit der ESP32 nicht in den Boot-Modus/Reset geht
+    port=p; buf=''; reader=p.readable.getReader(); writer=p.writable.getWriter();
+    okCount=0; badCount=0; lastLine=0; setConn(true); status('Verbunden – warte auf Daten …'); msg('');
+    readLoop(); return true;
+  }catch(e){ msg(explain(e)); return false }
+}
+function scheduleRetry(){
+  clearTimeout(retryT);
+  retryT=setTimeout(async function(){
+    if(!wantOpen||reader)return;
+    var ps=await navigator.serial.getPorts(); if(ps.length&&await openPort(ps[0]))return; scheduleRetry();
+  },1500);
+}
+$('bc').onclick=async function(){
+  if(!('serial' in navigator)){ msg('Dieser Browser kann kein Web Serial. Bitte Chrome oder Edge (Desktop) verwenden.'); return }
+  if(reader){ wantOpen=false; clearTimeout(retryT); await closePort(true); return }
+  try{ var p=await navigator.serial.requestPort(); port=p; wantOpen=true; await openPort(p) }
+  catch(e){ wantOpen=false; msg(explain(e)) }
+};
+if('serial' in navigator){
+  navigator.serial.addEventListener('disconnect',function(){ if(wantOpen){ status('USB-Kabel getrennt – warte auf Board …'); msg('Board getrennt. Beim Wiederanstecken verbindet die Seite automatisch neu.') } });
+  navigator.serial.addEventListener('connect',function(){ if(wantOpen&&!reader) scheduleRetry() });
+}else{ msg('Dieser Browser kann kein Web Serial. Bitte Chrome oder Edge (Desktop) verwenden.'); status('Web Serial nicht verfügbar') }
+setInterval(function(){
+  if(!reader)return; var age=Date.now()-lastLine;
+  if(badCount>20&&!okCount){ status('Nur Datenmüll empfangen – Baudrate prüfen (Firmware: 460800)') }
+  else if(!lastLine||age>2500){ status(lastLine?'Verbunden – keine Daten seit '+Math.round(age/1000)+' s (Board läuft? Baudrate 460800?)':'Verbunden – warte auf Daten …') }
+  else { rates(); status('Live · '+okCount+' Zeilen · '+stats.lps+' Zeilen/s · '+stats.fps+' Bilder/s · Latenz '+stats.latAvg.toFixed(0)+' ms'+(badCount?' · '+badCount+' verworfen':'')+(info?' · '+info:'')) }
+},500);
+ui(); draw(); window.addEventListener('resize',draw);
+})();
+</script></body></html>
